@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 
+from facesort.gpu import resolve_execution_backend
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,12 +24,30 @@ class FaceDetector:
         det_size: int = 640,
         min_face_size: int = 40,
     ) -> None:
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if use_gpu else ["CPUExecutionProvider"]
-        self.app = FaceAnalysis(name=model_name, providers=providers)
-        ctx_id = 0 if use_gpu else -1
-        self.app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
+        backend = resolve_execution_backend(use_gpu)
+        self.device_label: str = backend["device_label"]
+        self.using_gpu: bool = backend["using_gpu"]
+
+        self.app = FaceAnalysis(name=model_name, providers=backend["providers"])
+        self.app.prepare(ctx_id=backend["ctx_id"], det_size=(det_size, det_size))
         self.min_face_size = min_face_size
-        logger.info("FaceDetector 已加载模型 %s (GPU=%s)", model_name, use_gpu)
+
+        active = self._active_providers()
+        logger.info(
+            "FaceDetector 已加载模型 %s | 模式=%s | ONNX=%s",
+            model_name,
+            self.device_label,
+            active,
+        )
+
+    def _active_providers(self) -> list[str]:
+        """读取 InsightFace 内部 session 实际使用的 provider。"""
+        providers: set[str] = set()
+        for model in self.app.models.values():
+            session = getattr(model, "session", None)
+            if session is not None:
+                providers.update(session.get_providers())
+        return sorted(providers)
 
     def detect(self, image_path: str) -> list[dict[str, Any]]:
         """检测单张图片中的所有人脸，返回 bbox + embedding。"""

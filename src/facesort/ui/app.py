@@ -11,6 +11,7 @@ import gradio as gr
 
 from facesort.config import db_path, export_path, load_config
 from facesort.detector import FaceDetector
+from facesort.gpu import gpu_status_message
 from facesort.export import export_photos
 from facesort.indexer import Indexer
 from facesort.matcher import find_matches
@@ -45,8 +46,16 @@ def _get_indexer() -> Indexer:
 
 
 def _stats_text() -> str:
+    cfg = load_config()
     stats = _get_indexer().stats()
-    return f"已索引 **{stats['photos']}** 张照片，检测到 **{stats['faces']}** 张人脸，已标注 **{stats['tags']}** 条。"
+    gpu_line = gpu_status_message(cfg["use_gpu"])
+    if _detector is not None:
+        gpu_line = f"**加速模式：{_detector.device_label}**"
+    return (
+        f"{gpu_line}  \n"
+        f"已索引 **{stats['photos']}** 张照片，检测到 **{stats['faces']}** 张人脸，"
+        f"已标注 **{stats['tags']}** 条。"
+    )
 
 
 def do_scan(folder: str, incremental: bool) -> tuple[str, str]:

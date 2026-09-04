@@ -16,8 +16,15 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-echo [2/3] 安装依赖（首次运行较慢，需下载 AI 模型）...
+echo [2/3] 安装依赖（含 GPU 加速包，首次运行较慢）...
 .venv\Scripts\pip install -r requirements.txt -q
+.venv\Scripts\pip uninstall onnxruntime -y >nul 2>&1
+.venv\Scripts\pip install onnxruntime-gpu>=1.18.0 -q
+if errorlevel 1 (
+    echo GPU 包安装失败，尝试 CPU 版本...
+    .venv\Scripts\pip uninstall onnxruntime-gpu onnxruntime -y >nul 2>&1
+    .venv\Scripts\pip install -r requirements-cpu.txt -q
+)
 
 echo [3/3] 启动界面，浏览器将自动打开...
 echo 若未自动打开，请访问 http://127.0.0.1:7860

@@ -50,16 +50,22 @@ python main.py
 | 0.55 ~ 0.65 | **推荐**，平衡精度与召回 |
 | 0.65+ | 精度高，可能漏掉侧脸/模糊照 |
 
-## GPU 加速（可选）
+## GPU 加速（NVIDIA 显卡）
 
-有 NVIDIA 显卡时，编辑 `requirements.txt`：
+默认已启用 **GPU 加速**（`onnxruntime-gpu`），适用于 RTX 3060 / 4060 等 NVIDIA 显卡。
 
+1. 确保已安装 [NVIDIA 显卡驱动](https://www.nvidia.cn/drivers/)
+2. 双击 `run.bat` 即可，界面顶部会显示 `加速模式：GPU · 你的显卡型号`
+3. `config.yaml` 中 `use_gpu: true`（默认已开启）
+
+**无 NVIDIA 显卡时**，改用 CPU 版：
+
+```bash
+pip uninstall onnxruntime-gpu onnxruntime -y
+pip install -r requirements-cpu.txt
 ```
-# 注释掉 onnxruntime，改用：
-onnxruntime-gpu>=1.17.0
-```
 
-并在 `config.yaml` 中确认 `use_gpu: true`。
+并在 `config.yaml` 中设置 `use_gpu: false`。
 
 ## 隐私与安全
 
