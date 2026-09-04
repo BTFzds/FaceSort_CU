@@ -1,0 +1,11 @@
+insightface>=0.7.3
+onnxruntime>=1.17.0
+opencv-python-headless>=4.9.0
+numpy>=1.24.0
+pillow>=10.0.0
+gradio>=4.0.0
+pyyaml>=6.0
+tqdm>=4.66.0
+
+# 可选：有 NVIDIA 显卡时取消注释，替换 onnxruntime
+# onnxruntime-gpu>=1.17.0

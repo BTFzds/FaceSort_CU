@@ -1,0 +1,39 @@
+# FaceSort 配置文件 — 可按需修改
+
+# 人脸匹配相似度阈值 (0~1，越高越严格，建议 0.45~0.65)
+match_threshold: 0.55
+
+# 人脸检测最小尺寸（像素），过小的人脸会被忽略
+min_face_size: 40
+
+# 检测输入尺寸，越大越准但越慢
+det_size: 640
+
+# InsightFace 模型名称（首次运行自动下载）
+model_name: buffalo_l
+
+# 是否优先使用 GPU（需要 onnxruntime-gpu 和 CUDA）
+use_gpu: true
+
+# 扫描时使用的 CPU 工作进程数（0 = 自动）
+scan_workers: 0
+
+# 支持的图片扩展名
+image_extensions:
+  - .jpg
+  - .jpeg
+  - .png
+  - .bmp
+  - .webp
+  - .tif
+  - .tiff
+  - .heic
+
+# 本地数据库路径（相对于项目根目录）
+database_path: data/facesort.db
+
+# 默认导出目录
+export_dir: output
+
+# Web 界面端口（仅绑定本机）
+server_port: 7860

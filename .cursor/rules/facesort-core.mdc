@@ -1,0 +1,27 @@
+---
+description: FaceSort 核心约束 - 本地人脸照片检索与标注
+alwaysApply: true
+---
+
+# FaceSort_CU 项目原则
+
+## 业务目标
+从大量本地文件夹中精准找出指定人物的全部照片，支持打标签与分类导出。
+
+## 安全（强制）
+- 所有推理、索引、存储必须 100% 本地运行
+- 禁止调用任何云端人脸识别/视觉 API
+- Web UI 仅绑定 127.0.0.1，禁止 0.0.0.0
+- 默认只读访问源照片；写入仅限 data/ 与 output/
+- 禁止遥测与外网上报
+
+## 技术栈
+- Python 3.10+，InsightFace + ONNX Runtime，SQLite，Gradio
+- 依赖：requirements.txt + Ruff/pytest
+
+## 模块划分
+- scanner/ detector/ matcher/ indexer/ pipeline/ export/ ui/
+
+## UI 原则
+- 主流程 3 步：扫描 → 查找 → 导出
+- 中文界面，进度反馈，可中断
