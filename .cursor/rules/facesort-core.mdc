@@ -18,12 +18,13 @@ alwaysApply: true
 - 示例与测试数据仅用脱敏占位名（如 PersonA），禁止真实姓名/工号/客户信息入库或入库后提交 Git
 
 ## 技术栈
-- Python 3.10+，InsightFace + ONNX Runtime，SQLite，Gradio
+- Python 3.10+，InsightFace + ONNX Runtime，SQLite，CustomTkinter 桌面 UI
 - 依赖：requirements.txt + Ruff/pytest
 
 ## 模块划分
 - scanner/ detector/ matcher/ indexer/ pipeline/ export/ ui/
 
 ## UI 原则
-- 主流程 3 步：扫描 → 查找 → 导出
-- 中文界面，进度反馈，可中断
+- 桌面小程序（非浏览器）；主流程 3 步：扫描 → 查找 → 导出
+- 中文界面，进度条与状态文字，扫描/查找可感知
+- 示例姓名用 PersonA 等占位名

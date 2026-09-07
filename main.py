@@ -1,4 +1,4 @@
-"""FaceSort 入口：启动本地 Gradio 界面。"""
+"""FaceSort 入口：启动本地桌面小程序。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import logging
 import sys
 from pathlib import Path
 
-# 将 src 加入模块搜索路径，方便直接 python main.py 运行
 SRC = Path(__file__).resolve().parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -15,7 +14,7 @@ from facesort.gpu import ensure_cuda_dll_path  # noqa: E402
 
 ensure_cuda_dll_path()
 
-from facesort.ui.app import launch  # noqa: E402
+from facesort.ui.desktop import launch  # noqa: E402
 
 
 def main() -> None:

@@ -1,8 +1,8 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo   FaceSort 本地人脸照片整理工具
-echo   100%% 本地运行，数据不会上传
+echo   FaceSort 本地人脸整理（桌面版）
+echo   100%% 本地运行，不经过浏览器
 echo ========================================
 echo.
 
@@ -16,7 +16,7 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-echo [2/3] 安装依赖（含 GPU 加速包，首次运行较慢）...
+echo [2/3] 安装依赖...
 .venv\Scripts\pip install -r requirements.txt -q
 .venv\Scripts\pip uninstall onnxruntime -y >nul 2>&1
 .venv\Scripts\pip install "onnxruntime-gpu==1.20.2" nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12 -q
@@ -26,9 +26,6 @@ if errorlevel 1 (
     .venv\Scripts\pip install -r requirements-cpu.txt -q
 )
 
-echo [3/3] 启动界面，浏览器将自动打开...
-echo 若未自动打开，请访问 http://127.0.0.1:7860
-echo 按 Ctrl+C 可停止
-echo.
+echo [3/3] 启动桌面窗口...
 .venv\Scripts\python main.py
 pause

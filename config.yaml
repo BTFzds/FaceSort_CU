@@ -1,13 +1,16 @@
 # FaceSort 配置文件 — 可按需修改
 
-# 人脸匹配相似度阈值 (0~1，越高越严格，建议 0.45~0.65)
-match_threshold: 0.55
+# 人脸匹配相似度阈值 (0~1，越高越严格，建议 0.40~0.60)
+match_threshold: 0.45
 
-# 人脸检测最小尺寸（像素），过小的人脸会被忽略
-min_face_size: 40
+# 人脸检测最小尺寸（像素）— 合照小人脸建议 20~30
+min_face_size: 20
 
-# 检测输入尺寸，越大越准但越慢
-det_size: 640
+# 检测置信度阈值（越低越容易检出遮挡/侧脸，误检也会略增）
+det_thresh: 0.35
+
+# 检测输入尺寸，越大对小人脸越准但越慢（合照建议 640~960）
+det_size: 800
 
 # InsightFace 模型名称（首次运行自动下载）
 model_name: buffalo_l
@@ -34,6 +37,3 @@ database_path: data/facesort.db
 
 # 默认导出目录
 export_dir: output
-
-# Web 界面端口（仅绑定本机）
-server_port: 7860

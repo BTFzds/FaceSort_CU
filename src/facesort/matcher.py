@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
 from facesort.indexer import Indexer
+
+ProgressCb = Callable[[int, int, str], None]
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -19,15 +21,21 @@ def find_matches(
     reference: np.ndarray,
     threshold: float,
     person_name: str,
+    progress_callback: ProgressCb | None = None,
 ) -> list[dict[str, Any]]:
     """
     在索引库中查找与参考 embedding 相似的人脸。
     同一张照片只保留最高相似度的一条记录。
     """
+    faces = list(indexer.iter_all_faces())
+    total = len(faces)
     best_by_photo: dict[int, dict[str, Any]] = {}
 
-    for face_id, photo_id, embedding, photo_path in indexer.iter_all_faces():
+    for index, (face_id, photo_id, embedding, photo_path) in enumerate(faces, start=1):
         sim = cosine_similarity(reference, embedding)
+        if progress_callback and (index % 5 == 0 or index == total):
+            progress_callback(index, total, f"比对中 {index}/{total}")
+
         if sim < threshold:
             continue
         existing = best_by_photo.get(photo_id)

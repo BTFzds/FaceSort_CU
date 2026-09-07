@@ -23,13 +23,18 @@ class FaceDetector:
         use_gpu: bool = True,
         det_size: int = 640,
         min_face_size: int = 40,
+        det_thresh: float = 0.35,
     ) -> None:
         backend = resolve_execution_backend(use_gpu)
         self.device_label: str = backend["device_label"]
         self.using_gpu: bool = backend["using_gpu"]
 
         self.app = FaceAnalysis(name=model_name, providers=backend["providers"])
-        self.app.prepare(ctx_id=backend["ctx_id"], det_size=(det_size, det_size))
+        self.app.prepare(
+            ctx_id=backend["ctx_id"],
+            det_size=(det_size, det_size),
+            det_thresh=det_thresh,
+        )
         self.min_face_size = min_face_size
 
         active = self._active_providers()
