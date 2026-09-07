@@ -189,7 +189,7 @@ def build_app() -> gr.Blocks:
             scan_btn.click(do_scan, [folder_input, incremental], [scan_result, stats])
 
         with gr.Tab("② 查找人物"):
-            person_input = gr.Textbox(label="人物姓名", placeholder="例如：张三")
+            person_input = gr.Textbox(label="人物姓名", placeholder="例如：PersonA")
             ref_upload = gr.File(
                 label="参考照片（可上传多张，选最清晰的正脸）",
                 file_count="multiple",
