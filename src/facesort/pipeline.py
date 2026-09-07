@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from facesort.detector import FaceDetector
+from facesort.image_io import imread_bgr, short_filename
 from facesort.indexer import Indexer
 from facesort.scanner import file_fingerprint, iter_image_files
 
@@ -37,9 +38,12 @@ def scan_directory(
     faces_total = 0
     errors = 0
     retained_faces = 0
+    unread = 0
+    no_face = 0
 
     for index, path in enumerate(files, start=1):
         path_str = str(path)
+        short = short_filename(path.name, 22)
         try:
             file_hash, mtime = file_fingerprint(path)
             if incremental:
@@ -51,28 +55,35 @@ def scan_directory(
                         progress_callback(
                             index,
                             total,
-                            f"跳过未变化 {path.name}（保留 {existing['face_count']} 张人脸）",
+                            f"跳过 {short} 保留{int(existing['face_count'] or 0)}脸",
                         )
                     continue
 
-            faces = detector.detect(path_str)
+            # 先探测能否读取（中文路径等）
+            probe = imread_bgr(path_str)
+            if probe is None:
+                unread += 1
+                errors += 1
+                if progress_callback:
+                    progress_callback(index, total, f"无法读取 {short}")
+                continue
+
+            faces = detector.detect(path_str, image_bgr=probe)
             photo_id = indexer.upsert_photo(path_str, file_hash, mtime, len(faces))
             indexer.replace_faces(photo_id, faces)
             scanned += 1
             faces_total += len(faces)
+            if not faces:
+                no_face += 1
 
             if progress_callback:
-                progress_callback(
-                    index,
-                    total,
-                    f"检测中 {path.name} → {len(faces)} 张人脸",
-                )
+                progress_callback(index, total, f"检测 {short} → {len(faces)}脸")
 
         except Exception as exc:  # noqa: BLE001 — 单张失败不中断整批
             errors += 1
             logger.exception("处理失败 %s: %s", path_str, exc)
             if progress_callback:
-                progress_callback(index, total, f"失败 {path.name}: {exc}")
+                progress_callback(index, total, f"失败 {short}")
 
     return {
         "total_files": total,
@@ -81,4 +92,6 @@ def scan_directory(
         "faces": faces_total,
         "retained_faces": retained_faces,
         "errors": errors,
+        "unread": unread,
+        "no_face": no_face,
     }

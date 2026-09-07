@@ -10,12 +10,12 @@ from tkinter import filedialog, messagebox
 from typing import Any
 
 import customtkinter as ctk
-import cv2
 from PIL import Image
 
 from facesort.config import db_path, export_path, load_config
 from facesort.detector import FaceDetector
 from facesort.export import export_photos
+from facesort.image_io import imread_bgr, short_filename
 from facesort.indexer import Indexer
 from facesort.matcher import find_matches
 from facesort.pipeline import scan_directory
@@ -32,30 +32,33 @@ CARD = "#1A1F2E"
 BG = "#0F1219"
 MUTED = "#94A3B8"
 TEXT = "#F1F5F9"
+MAX_REFS = 5
 
 
 class FaceSortApp(ctk.CTk):
-    """单窗口工作流：扫描 → 查找 → 预览 → 导出。左侧无滚动条，一屏展示全部控件。"""
+    """扫描 → 多参考脸查找 → 预览 → 导出。"""
 
     def __init__(self) -> None:
         super().__init__()
         self.title("FaceSort 本地人脸整理")
-        self.geometry("1280x820")
-        self.minsize(1180, 760)
+        self.geometry("1280x840")
+        self.minsize(1180, 780)
         self.configure(fg_color=BG)
 
         self.cfg = load_config()
         self.indexer = Indexer(db_path(self.cfg))
         self.detector: FaceDetector | None = None
-        self.reference_path: str | None = None
+        self.reference_paths: list[str] = []
         self.matches: list[dict[str, Any]] = []
         self._thumb_refs: list[ctk.CTkImage] = []
-        self._ref_image: ctk.CTkImage | None = None
+        self._ref_thumbs: list[ctk.CTkImage] = []
         self._busy = False
         self._default_threshold = float(self.cfg.get("match_threshold", 0.45))
 
         self._build_ui()
+        self._hook_drag_drop()
         self._refresh_stats()
+        self._set_global_progress(0, "就绪")
         self.after(200, self._preload_model_async)
 
     def _build_ui(self) -> None:
@@ -69,7 +72,6 @@ class FaceSortApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI Semibold", size=22),
             text_color=ACCENT,
         ).pack(side="left", padx=(18, 8), pady=12)
-
         ctk.CTkLabel(
             header,
             text="本地整理 · 数据不出本机",
@@ -87,26 +89,40 @@ class FaceSortApp(ctk.CTk):
             command=self._reset_all,
         )
         self.reset_btn.pack(side="right", padx=(8, 16), pady=12)
-
         self.stats_label = ctk.CTkLabel(header, text="", font=ctk.CTkFont(size=11), text_color=MUTED)
         self.stats_label.pack(side="right", padx=8)
+
+        # 全局进度条（任何阶段都可见）
+        global_bar = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0, height=40)
+        global_bar.pack(fill="x")
+        global_bar.pack_propagate(False)
+        ctk.CTkLabel(global_bar, text="总进度", text_color=MUTED, width=50).pack(side="left", padx=(16, 6))
+        self.global_progress = ctk.CTkProgressBar(global_bar, progress_color=ACCENT, height=10, width=220)
+        self.global_progress.pack(side="left", padx=4)
+        self.global_progress.set(0)
+        self.global_status = ctk.CTkLabel(
+            global_bar,
+            text="就绪",
+            text_color=MUTED,
+            font=ctk.CTkFont(size=11),
+            width=700,
+            anchor="w",
+        )
+        self.global_status.pack(side="left", padx=10, fill="x", expand=True)
 
         export_bar = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0, height=54)
         export_bar.pack(side="bottom", fill="x")
         export_bar.pack_propagate(False)
-
         ctk.CTkLabel(
             export_bar,
             text="③ 导出（文件夹_人名）",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color=TEXT,
         ).pack(side="left", padx=16)
-
         self.export_hint = ctk.CTkLabel(
             export_bar, text="查找后可导出", text_color=MUTED, font=ctk.CTkFont(size=11)
         )
         self.export_hint.pack(side="left", padx=6)
-
         self.open_out_btn = ctk.CTkButton(
             export_bar,
             text="打开导出目录",
@@ -117,7 +133,6 @@ class FaceSortApp(ctk.CTk):
             command=self._open_output_dir,
         )
         self.open_out_btn.pack(side="right", padx=(6, 16), pady=10)
-
         self.export_btn = ctk.CTkButton(
             export_bar,
             text="导出匹配结果",
@@ -132,16 +147,14 @@ class FaceSortApp(ctk.CTk):
         self.export_btn.pack(side="right", padx=6, pady=10)
 
         body = ctk.CTkFrame(self, fg_color=BG)
-        body.pack(fill="both", expand=True, padx=14, pady=10)
-        body.grid_columnconfigure(0, weight=0, minsize=420)
+        body.pack(fill="both", expand=True, padx=14, pady=8)
+        body.grid_columnconfigure(0, weight=0, minsize=430)
         body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
 
-        # 左侧固定面板：不用 ScrollableFrame，避免滚轮
-        left = ctk.CTkFrame(body, fg_color=CARD, corner_radius=14, width=420)
+        left = ctk.CTkFrame(body, fg_color=CARD, corner_radius=14, width=430)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         left.grid_propagate(False)
-
         right = ctk.CTkFrame(body, fg_color=CARD, corner_radius=14)
         right.grid(row=0, column=1, sticky="nsew")
 
@@ -150,22 +163,15 @@ class FaceSortApp(ctk.CTk):
 
     def _build_left(self, parent: ctk.CTkFrame) -> None:
         pad_x = 12
-
         ctk.CTkLabel(
-            parent,
-            text="① 扫描相册",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=TEXT,
-        ).pack(anchor="w", padx=pad_x, pady=(10, 2))
+            parent, text="① 扫描相册", font=ctk.CTkFont(size=14, weight="bold"), text_color=TEXT
+        ).pack(anchor="w", padx=pad_x, pady=(8, 2))
 
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=pad_x, pady=2)
         self.folder_var = tk.StringVar()
         ctk.CTkEntry(
-            row,
-            textvariable=self.folder_var,
-            placeholder_text="选择含照片的文件夹…",
-            height=30,
+            row, textvariable=self.folder_var, placeholder_text="选择含照片的文件夹…", height=30
         ).pack(side="left", fill="x", expand=True, padx=(0, 6))
         ctk.CTkButton(
             row,
@@ -187,13 +193,12 @@ class FaceSortApp(ctk.CTk):
             text_color=MUTED,
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
-            width=100,
         ).pack(side="left")
 
         self.scan_btn = ctk.CTkButton(
             parent,
             text="开始扫描",
-            height=34,
+            height=32,
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
             text_color="#042F2E",
@@ -205,66 +210,73 @@ class FaceSortApp(ctk.CTk):
         self.scan_progress = ctk.CTkProgressBar(parent, progress_color=ACCENT, height=8)
         self.scan_progress.pack(fill="x", padx=pad_x, pady=2)
         self.scan_progress.set(0)
+        # 固定高度/宽度，避免文件名长短导致抽动
         self.scan_status = ctk.CTkLabel(
-            parent, text="等待扫描", text_color=MUTED, font=ctk.CTkFont(size=11), wraplength=380, justify="left"
+            parent,
+            text="等待扫描".ljust(42),
+            text_color=MUTED,
+            font=ctk.CTkFont(size=11, family="Consolas"),
+            height=28,
+            width=400,
+            anchor="w",
         )
         self.scan_status.pack(anchor="w", padx=pad_x)
+        self.scan_status.pack_propagate(False)
 
-        # 分隔线
-        ctk.CTkFrame(parent, fg_color="#334155", height=1).pack(fill="x", padx=pad_x, pady=8)
+        ctk.CTkFrame(parent, fg_color="#334155", height=1).pack(fill="x", padx=pad_x, pady=6)
 
         ctk.CTkLabel(
-            parent,
-            text="② 参考脸查找",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=TEXT,
+            parent, text="② 参考脸查找（可多张）", font=ctk.CTkFont(size=14, weight="bold"), text_color=TEXT
         ).pack(anchor="w", padx=pad_x, pady=(0, 2))
 
         name_row = ctk.CTkFrame(parent, fg_color="transparent")
         name_row.pack(fill="x", padx=pad_x, pady=2)
         ctk.CTkLabel(name_row, text="人名", text_color=MUTED, width=40).pack(side="left")
         self.name_var = tk.StringVar(value="PersonA")
-        ctk.CTkEntry(name_row, textvariable=self.name_var, height=30).pack(
+        ctk.CTkEntry(name_row, textvariable=self.name_var, height=28).pack(
             side="left", fill="x", expand=True
         )
-
         ctk.CTkLabel(
             parent,
-            text="标注：文件夹_人名（如 USA_Obama）",
+            text="标注：文件夹_人名｜多张参考脸可提高合照召回",
             text_color=MUTED,
             font=ctk.CTkFont(size=10),
         ).pack(anchor="w", padx=pad_x)
 
-        ref_row = ctk.CTkFrame(parent, fg_color="transparent")
-        ref_row.pack(fill="x", padx=pad_x, pady=6)
-        self.ref_preview = ctk.CTkLabel(
-            ref_row,
-            text="参考照",
-            width=72,
-            height=72,
-            fg_color="#0B1220",
-            corner_radius=8,
-            text_color=MUTED,
-            font=ctk.CTkFont(size=11),
-        )
-        self.ref_preview.pack(side="left", padx=(0, 8))
-        ref_btns = ctk.CTkFrame(ref_row, fg_color="transparent")
-        ref_btns.pack(side="left", fill="both", expand=True)
+        # 拖拽投放区
+        self.drop_zone = ctk.CTkFrame(parent, fg_color="#0B1220", corner_radius=10, height=92)
+        self.drop_zone.pack(fill="x", padx=pad_x, pady=6)
+        self.drop_zone.pack_propagate(False)
+        self.ref_strip = ctk.CTkFrame(self.drop_zone, fg_color="transparent")
+        self.ref_strip.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+        right_btns = ctk.CTkFrame(self.drop_zone, fg_color="transparent", width=110)
+        right_btns.pack(side="right", padx=6, pady=6)
         ctk.CTkButton(
-            ref_btns,
-            text="选择参考照片",
-            height=30,
+            right_btns,
+            text="添加参考脸",
+            width=100,
+            height=28,
             fg_color="#334155",
             hover_color="#475569",
-            command=self._pick_reference,
-        ).pack(fill="x", pady=(4, 4))
-        ctk.CTkLabel(
-            ref_btns,
-            text="清晰正脸；合照可降至 0.35",
+            command=self._pick_references,
+        ).pack(pady=(4, 4))
+        ctk.CTkButton(
+            right_btns,
+            text="清空参考",
+            width=100,
+            height=26,
+            fg_color="#475569",
+            hover_color="#64748B",
+            command=self._clear_references,
+        ).pack()
+        self.drop_hint = ctk.CTkLabel(
+            self.ref_strip,
+            text=f"拖拽图片到此处（最多 {MAX_REFS} 张）\n或点右侧添加",
             text_color=MUTED,
-            font=ctk.CTkFont(size=10),
-            anchor="w",
-        ).pack(fill="x")
+            font=ctk.CTkFont(size=11),
+            justify="left",
+        )
+        self.drop_hint.pack(anchor="w", padx=4, pady=16)
 
         thr_row = ctk.CTkFrame(parent, fg_color="transparent")
         thr_row.pack(fill="x", padx=pad_x, pady=2)
@@ -289,7 +301,7 @@ class FaceSortApp(ctk.CTk):
         self.find_btn = ctk.CTkButton(
             parent,
             text="开始查找",
-            height=34,
+            height=32,
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
             text_color="#042F2E",
@@ -302,34 +314,64 @@ class FaceSortApp(ctk.CTk):
         self.find_progress.pack(fill="x", padx=pad_x, pady=2)
         self.find_progress.set(0)
         self.find_status = ctk.CTkLabel(
-            parent, text="等待查找", text_color=MUTED, font=ctk.CTkFont(size=11), wraplength=380, justify="left"
+            parent,
+            text="等待查找".ljust(42),
+            text_color=MUTED,
+            font=ctk.CTkFont(size=11, family="Consolas"),
+            height=28,
+            width=400,
+            anchor="w",
         )
-        self.find_status.pack(anchor="w", padx=pad_x, pady=(0, 8))
+        self.find_status.pack(anchor="w", padx=pad_x, pady=(0, 6))
+        self.find_status.pack_propagate(False)
 
     def _build_right(self, parent: ctk.CTkFrame) -> None:
         top = ctk.CTkFrame(parent, fg_color="transparent")
         top.pack(fill="x", padx=14, pady=(10, 4))
         ctk.CTkLabel(
-            top,
-            text="匹配结果预览",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=TEXT,
+            top, text="匹配结果预览", font=ctk.CTkFont(size=14, weight="bold"), text_color=TEXT
         ).pack(side="left")
         self.result_count = ctk.CTkLabel(top, text="0 张", text_color=ACCENT)
         self.result_count.pack(side="right")
-
         self.gallery = ctk.CTkScrollableFrame(parent, fg_color="#0B1220", corner_radius=10)
         self.gallery.pack(fill="both", expand=True, padx=14, pady=(0, 12))
         self._show_gallery_placeholder("查找后在此显示缩略图")
 
+    def _hook_drag_drop(self) -> None:
+        try:
+            import windnd
+
+            def on_drop(files: list) -> None:
+                paths: list[str] = []
+                for item in files:
+                    if isinstance(item, bytes):
+                        try:
+                            text = item.decode("utf-8")
+                        except UnicodeDecodeError:
+                            text = item.decode("gbk", errors="ignore")
+                    else:
+                        text = str(item)
+                    paths.append(text)
+                self.after(0, lambda: self._add_reference_paths(paths))
+
+            windnd.hook_dropfiles(self.drop_zone, func=on_drop)
+            # 也允许拖到整窗左侧
+            windnd.hook_dropfiles(self, func=on_drop)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("拖拽不可用: %s", exc)
+
+    def _set_global_progress(self, ratio: float, text: str) -> None:
+        self.global_progress.set(max(0.0, min(1.0, ratio)))
+        self.global_status.configure(text=short_filename(text, 80).rstrip())
+
+    def _set_fixed_status(self, label: ctk.CTkLabel, text: str) -> None:
+        label.configure(text=short_filename(text, 42))
+
     def _show_gallery_placeholder(self, text: str) -> None:
         self._clear_gallery()
-        ctk.CTkLabel(
-            self.gallery,
-            text=text,
-            text_color=MUTED,
-            font=ctk.CTkFont(size=13),
-        ).pack(expand=True, pady=60)
+        ctk.CTkLabel(self.gallery, text=text, text_color=MUTED, font=ctk.CTkFont(size=13)).pack(
+            expand=True, pady=60
+        )
         self.result_count.configure(text="0 张")
         self.after(30, self._scroll_gallery_top)
 
@@ -339,10 +381,8 @@ class FaceSortApp(ctk.CTk):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         state = "disabled" if busy else "normal"
-        self.scan_btn.configure(state=state)
-        self.find_btn.configure(state=state)
-        self.export_btn.configure(state=state)
-        self.reset_btn.configure(state=state)
+        for btn in (self.scan_btn, self.find_btn, self.export_btn, self.reset_btn):
+            btn.configure(state=state)
 
     def _gpu_status_text(self) -> str:
         if self.detector is None:
@@ -364,12 +404,14 @@ class FaceSortApp(ctk.CTk):
     def _preload_model_async(self) -> None:
         def work() -> None:
             try:
+                self._set_global_progress(0.05, "正在加载人脸模型…")
                 self._get_detector()
 
                 def done() -> None:
                     self._refresh_stats()
                     gpu = "CUDA 已启用" if self.detector and self.detector.using_gpu else "CPU"
-                    self.scan_status.configure(text=f"模型就绪（{gpu}），可开始扫描")
+                    self._set_fixed_status(self.scan_status, f"模型就绪（{gpu}）")
+                    self._set_global_progress(0, f"就绪（{gpu}）")
 
                 self.after(0, done)
             except Exception as exc:  # noqa: BLE001
@@ -394,18 +436,60 @@ class FaceSortApp(ctk.CTk):
         if path:
             self.folder_var.set(path)
 
-    def _pick_reference(self) -> None:
-        path = filedialog.askopenfilename(
-            title="选择参考照片",
+    def _pick_references(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="选择参考照片（可多选）",
             filetypes=[("图片", "*.jpg *.jpeg *.png *.webp *.bmp"), ("全部", "*.*")],
         )
-        if not path:
+        if paths:
+            self._add_reference_paths(list(paths))
+
+    def _add_reference_paths(self, paths: list[str]) -> None:
+        exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+        for p in paths:
+            path = Path(p.strip().strip("{}"))
+            if path.suffix.lower() not in exts:
+                continue
+            if not path.is_file():
+                continue
+            sp = str(path.resolve())
+            if sp in self.reference_paths:
+                continue
+            if len(self.reference_paths) >= MAX_REFS:
+                messagebox.showinfo("提示", f"最多 {MAX_REFS} 张参考脸")
+                break
+            self.reference_paths.append(sp)
+        self._refresh_ref_strip()
+
+    def _clear_references(self) -> None:
+        self.reference_paths.clear()
+        self._refresh_ref_strip()
+
+    def _refresh_ref_strip(self) -> None:
+        for child in self.ref_strip.winfo_children():
+            child.destroy()
+        self._ref_thumbs.clear()
+        if not self.reference_paths:
+            self.drop_hint = ctk.CTkLabel(
+                self.ref_strip,
+                text=f"拖拽图片到此处（最多 {MAX_REFS} 张）\n或点右侧添加",
+                text_color=MUTED,
+                font=ctk.CTkFont(size=11),
+                justify="left",
+            )
+            self.drop_hint.pack(anchor="w", padx=4, pady=16)
             return
-        self.reference_path = path
-        img = Image.open(path).convert("RGB")
-        img.thumbnail((72, 72))
-        self._ref_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-        self.ref_preview.configure(image=self._ref_image, text="")
+        for path in self.reference_paths:
+            try:
+                img = Image.open(path).convert("RGB")
+                img.thumbnail((64, 64))
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                self._ref_thumbs.append(ctk_img)
+                ctk.CTkLabel(self.ref_strip, image=ctk_img, text="").pack(side="left", padx=3)
+            except OSError:
+                ctk.CTkLabel(self.ref_strip, text="?", width=40, text_color=MUTED).pack(
+                    side="left", padx=3
+                )
 
     def _scroll_gallery_top(self) -> None:
         try:
@@ -421,11 +505,9 @@ class FaceSortApp(ctk.CTk):
         self._thumb_refs.clear()
 
     def _reset_all(self) -> None:
-        """重置界面与匹配结果；可选清空本地索引库。"""
         if self._busy:
             messagebox.showinfo("提示", "请等待当前任务完成后再重置")
             return
-
         clear_db = messagebox.askyesnocancel(
             "重置",
             "将清空：参考照、匹配结果、进度与预览。\n\n"
@@ -436,20 +518,19 @@ class FaceSortApp(ctk.CTk):
             return
 
         self.matches = []
-        self.reference_path = None
-        self._ref_image = None
-        self.ref_preview.configure(image=None, text="参考照")
+        self.reference_paths.clear()
+        self._refresh_ref_strip()
         self.name_var.set("PersonA")
         self.threshold_var.set(self._default_threshold)
         self.threshold_label.configure(text=f"{self._default_threshold:.2f}")
         self.incremental_var.set(True)
-
         self.scan_progress.set(0)
         self.find_progress.set(0)
-        self.scan_status.configure(text="已重置，可重新扫描")
-        self.find_status.configure(text="等待查找")
+        self._set_fixed_status(self.scan_status, "已重置，可重新扫描")
+        self._set_fixed_status(self.find_status, "等待查找")
         self.export_hint.configure(text="查找后可导出")
         self._show_gallery_placeholder("已重置，查找后在此显示结果")
+        self._set_global_progress(0, "已重置")
 
         if clear_db:
             db = db_path(self.cfg)
@@ -460,7 +541,7 @@ class FaceSortApp(ctk.CTk):
                 messagebox.showerror("重置失败", f"无法删除索引库：{exc}")
                 return
             self.indexer = Indexer(db)
-            self.scan_status.configure(text="已重置并清空索引，请重新扫描")
+            self._set_fixed_status(self.scan_status, "已重置并清空索引")
 
         self._refresh_stats()
         messagebox.showinfo("完成", "界面已重置" + ("，索引库已清空" if clear_db else ""))
@@ -469,9 +550,8 @@ class FaceSortApp(ctk.CTk):
         self._clear_gallery()
         self.result_count.configure(text=f"{len(matches)} 张")
         self._scroll_gallery_top()
-
         if not matches:
-            self._show_gallery_placeholder("没有匹配结果\n可降低相似度阈值后重试")
+            self._show_gallery_placeholder("没有匹配结果\n可降低相似度或增加参考脸")
             self.export_hint.configure(text="暂无结果可导出")
             return
 
@@ -511,7 +591,8 @@ class FaceSortApp(ctk.CTk):
 
         self._set_busy(True)
         self.scan_progress.set(0)
-        self.scan_status.configure(text="准备扫描…")
+        self._set_fixed_status(self.scan_status, "准备扫描…")
+        self._set_global_progress(0.01, "开始扫描相册…")
 
         def work() -> None:
             try:
@@ -522,7 +603,8 @@ class FaceSortApp(ctk.CTk):
 
                     def update(r: float = ratio, c: int = cur, t: int = total, m: str = msg) -> None:
                         self.scan_progress.set(r)
-                        self.scan_status.configure(text=f"{c}/{t}  {m}")
+                        self._set_fixed_status(self.scan_status, f"{c}/{t} {m}")
+                        self._set_global_progress(r * 0.95, f"扫描 {c}/{t} {m}")
 
                     self.after(0, update)
 
@@ -538,20 +620,35 @@ class FaceSortApp(ctk.CTk):
                 def done() -> None:
                     self.scan_progress.set(1)
                     msg = (
-                        f"完成：共{result['total_files']}｜新扫{result['scanned']}｜"
-                        f"跳过{result['skipped']}｜新人脸{result['faces']}｜"
-                        f"保留{result['retained_faces']}"
+                        f"完成 共{result['total_files']} 新扫{result['scanned']} "
+                        f"跳过{result['skipped']} 人脸{result['faces']} "
+                        f"未读{result.get('unread', 0)} 无人脸{result.get('no_face', 0)}"
                     )
-                    if result["errors"]:
-                        msg += f"｜失败{result['errors']}"
-                    self.scan_status.configure(text=msg)
+                    self._set_fixed_status(self.scan_status, msg)
+                    self._set_global_progress(1, msg)
+                    if result["faces"] == 0 and result["scanned"] > 0:
+                        messagebox.showwarning(
+                            "未检测到人脸",
+                            "已扫描文件但人脸数为 0。\n"
+                            "可能原因：图片无人脸、截图/便签、或格式特殊。\n"
+                            f"无法读取：{result.get('unread', 0)} 张；"
+                            f"可读但无人脸：{result.get('no_face', 0)} 张。\n"
+                            "请取消增量后重试，或换含清晰人脸的相册。",
+                        )
                     self._refresh_stats()
                     self._set_busy(False)
 
                 self.after(0, done)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("扫描失败")
-                self.after(0, lambda: (messagebox.showerror("扫描失败", str(exc)), self._set_busy(False)))
+                self.after(
+                    0,
+                    lambda: (
+                        messagebox.showerror("扫描失败", str(exc)),
+                        self._set_busy(False),
+                        self._set_global_progress(0, "扫描失败"),
+                    ),
+                )
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -559,33 +656,54 @@ class FaceSortApp(ctk.CTk):
         if self._busy:
             return
         name = self.name_var.get().strip() or "PersonA"
-        if not self.reference_path:
-            messagebox.showwarning("提示", "请先选择参考照片")
+        if not self.reference_paths:
+            messagebox.showwarning("提示", "请先添加至少 1 张参考脸（可拖拽）")
             return
 
         self._set_busy(True)
         self.find_progress.set(0)
-        self.find_status.configure(text="提取参考脸…")
+        self._set_fixed_status(self.find_status, "提取参考脸…")
+        self._set_global_progress(0.02, "提取参考脸…")
         self._show_gallery_placeholder("查找中…")
         threshold = float(self.threshold_var.get())
+        ref_paths = list(self.reference_paths)
 
         def work() -> None:
             try:
                 detector = self._get_detector()
-                img = cv2.imread(self.reference_path)
-                if img is None:
-                    raise RuntimeError("无法读取参考照片")
-                faces = detector.detect_from_array(img)
-                reference = detector.reference_embedding(faces)
+                all_faces: list[dict[str, Any]] = []
+                total_refs = len(ref_paths)
+                for i, ref in enumerate(ref_paths, start=1):
+                    ratio = i / max(total_refs, 1) * 0.25
+
+                    def upd(
+                        r: float = ratio,
+                        idx: int = i,
+                        n: int = total_refs,
+                        fn: str = Path(ref).name,
+                    ) -> None:
+                        self.find_progress.set(r)
+                        self._set_fixed_status(self.find_status, f"提取参考脸 {idx}/{n} {short_filename(fn, 18)}")
+                        self._set_global_progress(r, f"提取参考脸 {idx}/{n}")
+
+                    self.after(0, upd)
+                    img = imread_bgr(ref)
+                    if img is None:
+                        continue
+                    all_faces.extend(detector.detect_from_array(img))
+
+                reference = detector.reference_embedding(all_faces)
                 if reference is None:
-                    raise RuntimeError("参考照未检测到人脸，请换一张更清晰的正脸")
+                    raise RuntimeError("参考照未检测到人脸，请换更清晰的正脸（可多张）")
 
                 def on_progress(cur: int, total: int, msg: str) -> None:
-                    ratio = cur / total if total else 0
+                    # 参考脸提取占 0~25%，比对占 25%~100%
+                    ratio = 0.25 + (cur / total if total else 0) * 0.75
 
-                    def update(r: float = ratio, m: str = msg) -> None:
+                    def update(r: float = ratio, m: str = msg, c: int = cur, t: int = total) -> None:
                         self.find_progress.set(r)
-                        self.find_status.configure(text=m)
+                        self._set_fixed_status(self.find_status, f"{c}/{t} {m}")
+                        self._set_global_progress(r, f"比对 {c}/{t}")
 
                     self.after(0, update)
 
@@ -605,13 +723,17 @@ class FaceSortApp(ctk.CTk):
                     self.find_progress.set(1)
                     if matches:
                         sample_tags = sorted({m["person_name"] for m in matches})[:3]
-                        self.find_status.configure(
-                            text=f"找到 {len(matches)} 张｜标注：{', '.join(sample_tags)}"
+                        self._set_fixed_status(
+                            self.find_status,
+                            f"找到{len(matches)}张 标注:{','.join(sample_tags)}",
                         )
+                        self._set_global_progress(1, f"查找完成：{len(matches)} 张")
                     else:
-                        self.find_status.configure(
-                            text=f"未找到匹配，可降低阈值（当前 {threshold:.2f}）"
+                        self._set_fixed_status(
+                            self.find_status,
+                            f"未匹配，可降阈值或加参考脸({threshold:.2f})",
                         )
+                        self._set_global_progress(1, "查找完成：0 张")
                     self._render_gallery(matches)
                     self._refresh_stats()
                     self._set_busy(False)
@@ -619,7 +741,14 @@ class FaceSortApp(ctk.CTk):
                 self.after(0, done)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("查找失败")
-                self.after(0, lambda: (messagebox.showerror("查找失败", str(exc)), self._set_busy(False)))
+                self.after(
+                    0,
+                    lambda: (
+                        messagebox.showerror("查找失败", str(exc)),
+                        self._set_busy(False),
+                        self._set_global_progress(0, "查找失败"),
+                    ),
+                )
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -635,15 +764,11 @@ class FaceSortApp(ctk.CTk):
                 [{"path": t["path"], "similarity": t["similarity"], "photo_id": 0} for t in tagged],
                 name,
             )
-
         dest = export_path(self.cfg)
         result = export_photos(matches, dest, name, mode="copy")
         messagebox.showinfo(
             "导出完成",
-            f"已导出 {result['exported']} 张\n"
-            f"子文件夹数：{result.get('folders', 1)}\n"
-            f"位置：{result['dest']}\n\n"
-            "目录名格式：文件夹_人名",
+            f"已导出 {result['exported']} 张\n子文件夹数：{result.get('folders', 1)}\n位置：{result['dest']}",
         )
         self.export_hint.configure(text=f"已导出 {result['exported']} 张")
 

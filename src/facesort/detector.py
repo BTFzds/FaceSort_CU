@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 
 from facesort.gpu import resolve_execution_backend
+from facesort.image_io import imread_bgr
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +59,13 @@ class FaceDetector:
                 providers.update(session.get_providers())
         return sorted(providers)
 
-    def detect(self, image_path: str) -> list[dict[str, Any]]:
+    def detect(
+        self,
+        image_path: str,
+        image_bgr: np.ndarray | None = None,
+    ) -> list[dict[str, Any]]:
         """检测单张图片中的所有人脸，返回 bbox + embedding。"""
-        img = cv2.imread(image_path)
+        img = image_bgr if image_bgr is not None else imread_bgr(image_path)
         if img is None:
             logger.warning("无法读取图片: %s", image_path)
             return []
