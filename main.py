@@ -11,6 +11,10 @@ SRC = Path(__file__).resolve().parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from facesort.gpu import ensure_cuda_dll_path  # noqa: E402
+
+ensure_cuda_dll_path()
+
 from facesort.ui.app import launch  # noqa: E402
 
 

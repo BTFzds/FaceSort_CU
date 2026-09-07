@@ -15,6 +15,7 @@ venv/
 # Project data (local only, never commit photos)
 data/
 output/
+testdata/
 *.db
 *.sqlite3
 

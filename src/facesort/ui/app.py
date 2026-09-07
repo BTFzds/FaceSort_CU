@@ -162,7 +162,7 @@ def build_app() -> gr.Blocks:
     """构建 Gradio 应用。"""
     cfg = load_config()
 
-    with gr.Blocks(title="FaceSort 本地人脸照片整理", theme=gr.themes.Soft()) as app:
+    with gr.Blocks(title="FaceSort 本地人脸照片整理") as app:
         gr.Markdown(
             """
             # FaceSort — 本地人脸照片整理工具
@@ -240,6 +240,9 @@ def build_app() -> gr.Blocks:
 
 def launch() -> None:
     """启动本地 Web 界面。"""
+    import os
+
+    os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
     cfg = load_config()
     app = build_app()
     app.launch(
@@ -247,4 +250,5 @@ def launch() -> None:
         server_port=cfg["server_port"],
         share=False,
         show_error=True,
+        theme=gr.themes.Soft(),
     )

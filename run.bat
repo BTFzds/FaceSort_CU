@@ -19,7 +19,7 @@ if not exist ".venv\Scripts\python.exe" (
 echo [2/3] 安装依赖（含 GPU 加速包，首次运行较慢）...
 .venv\Scripts\pip install -r requirements.txt -q
 .venv\Scripts\pip uninstall onnxruntime -y >nul 2>&1
-.venv\Scripts\pip install onnxruntime-gpu>=1.18.0 -q
+.venv\Scripts\pip install "onnxruntime-gpu==1.20.2" nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12 -q
 if errorlevel 1 (
     echo GPU 包安装失败，尝试 CPU 版本...
     .venv\Scripts\pip uninstall onnxruntime-gpu onnxruntime -y >nul 2>&1
