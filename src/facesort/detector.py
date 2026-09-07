@@ -36,14 +36,19 @@ class FaceDetector:
             det_thresh=det_thresh,
         )
         self.min_face_size = min_face_size
+        self.active_providers: list[str] = self._active_providers()
 
-        active = self._active_providers()
         logger.info(
             "FaceDetector 已加载模型 %s | 模式=%s | ONNX=%s",
             model_name,
             self.device_label,
-            active,
+            self.active_providers,
         )
+
+        # 启动时核对：列表含 CUDA 但实际 session 只有 CPU 时纠正状态
+        if self.using_gpu and "CUDAExecutionProvider" not in self.active_providers:
+            self.using_gpu = False
+            self.device_label = "CPU（CUDA 未实际加载）"
 
     def _active_providers(self) -> list[str]:
         """读取 InsightFace 内部 session 实际使用的 provider。"""
