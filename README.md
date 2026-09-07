@@ -73,6 +73,8 @@ pip install -r requirements-cpu.txt
 - Web 界面仅绑定 `127.0.0.1`，不对外网开放
 - 源照片默认只读；仅索引库（`data/`）和导出目录（`output/`）会写入
 - 首次运行会从 InsightFace 官方源下载模型到 `~/.insightface/`
+- **请勿**将真实工作照片、内部文档、客户资料提交到 Git；`data/`、`output/`、`.venv/` 已在 `.gitignore` 中排除
+- 对外分享仓库时，标签与导出目录请使用通用占位姓名（如 `PersonA`），避免写入可识别的真实身份信息
 
 ## 项目结构
 

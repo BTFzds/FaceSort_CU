@@ -14,6 +14,8 @@ alwaysApply: true
 - Web UI 仅绑定 127.0.0.1，禁止 0.0.0.0
 - 默认只读访问源照片；写入仅限 data/ 与 output/
 - 禁止遥测与外网上报
+- 代码、注释、文档、UI 文案禁止出现任何公司/运营商/内部项目代号等敏感字眼
+- 示例与测试数据仅用脱敏占位名（如 PersonA），禁止真实姓名/工号/客户信息入库或入库后提交 Git
 
 ## 技术栈
 - Python 3.10+，InsightFace + ONNX Runtime，SQLite，Gradio
